@@ -14,6 +14,7 @@
 #include "extractor/profile_properties.hpp"
 #include "extractor/query_node.hpp"
 #include "storage/storage_config.hpp"
+#include "storage/io.hpp"
 #include "engine/geospatial_query.hpp"
 #include "util/graph_loader.hpp"
 #include "util/guidance/turn_lanes.hpp"
@@ -150,21 +151,22 @@ class InternalDataFacade final : public BaseDataFacade
 
     void LoadGraph(const boost::filesystem::path &hsgr_path)
     {
-        util::ShM<QueryGraph::NodeArrayEntry, false>::vector node_list;
-        util::ShM<QueryGraph::EdgeArrayEntry, false>::vector edge_list;
+        boost::filesystem::ifstream hsgr_input_stream(hsgr_path);
+        if (!hsgr_input_stream)
+        {
+            throw util::exception("Could not open " + hsgr_path.string() + " for reading.");
+        }
+        std::size_t number_of_graph_nodes = 0;
+        std::size_t number_of_graph_edges = 0;
+        std::tie(m_check_sum, number_of_graph_nodes, number_of_graph_edges) = storage::io::readHSGRSize(hsgr_input_stream);
 
-        util::SimpleLogger().Write() << "loading graph from " << hsgr_path.string();
+        util::ShM<QueryGraph::NodeArrayEntry, false>::vector node_list(number_of_graph_nodes);
+        util::ShM<QueryGraph::EdgeArrayEntry, false>::vector edge_list(number_of_graph_edges);
 
-        m_number_of_nodes = readHSGRFromStream(hsgr_path, node_list, edge_list, &m_check_sum);
+        storage::io::readHSGR(hsgr_input_stream, node_list.data(), number_of_graph_nodes, edge_list.data(), number_of_graph_edges);
 
-        BOOST_ASSERT_MSG(0 != node_list.size(), "node list empty");
-        // BOOST_ASSERT_MSG(0 != edge_list.size(), "edge list empty");
-        util::SimpleLogger().Write() << "loaded " << node_list.size() << " nodes and "
-                                     << edge_list.size() << " edges";
         m_query_graph = std::unique_ptr<QueryGraph>(new QueryGraph(node_list, edge_list));
 
-        BOOST_ASSERT_MSG(0 == node_list.size(), "node list not flushed");
-        BOOST_ASSERT_MSG(0 == edge_list.size(), "edge list not flushed");
         util::SimpleLogger().Write() << "Data checksum is " << m_check_sum;
     }
 
